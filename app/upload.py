@@ -4,10 +4,9 @@ from typing import List, Optional
 from io import BytesIO
 import re
 
-# Dependencia de auth
 from .auth import get_current_user, UserPublic
 
-# Intentamos importar; si faltan, levantamos error claro
+# Dependencias opcionales con error claro si faltan
 try:
     import openpyxl
 except Exception:  # pragma: no cover
@@ -20,17 +19,18 @@ except Exception:  # pragma: no cover
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
-# Patrones de ejemplo (elige uno que aparezca en tus archivos):
+# Patrones de extracción (ajusta según tus datos)
 RFC_PATTERN = re.compile(r"\b([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})\b")
-STATION_PATTERN = re.compile(r"\b[A-Z]{4}\d{4}\b")  # p.ej. ACAP1234
+STATION_PATTERN = re.compile(r"\b[A-Z]{4}\d{4}\b")  # p. ej. ACAP1234
 
 class UploadResult(BaseModel):
     filename: str
-    kind: str                       # pdf|excel
+    kind: str                       # "pdf" | "excel"
     extracted: Optional[str] = None # primer match
-    candidates: List[str] = []      # todos los matches encontrados
+    candidates: List[str] = []      # todos los matches
 
 def _find_matches(text: str) -> List[str]:
+    """Devuelve todos los matches únicos de los patrones configurados."""
     if not text:
         return []
     c = set()
@@ -39,6 +39,7 @@ def _find_matches(text: str) -> List[str]:
     return list(c)
 
 def _error_500(msg: str) -> HTTPException:
+    """Atajo para errores de dependencia/servidor."""
     return HTTPException(status_code=500, detail=msg)
 
 @router.post("", response_model=UploadResult)
@@ -46,10 +47,11 @@ async def upload_file(
     file: UploadFile = File(...),
     _: UserPublic = Depends(get_current_user),
 ):
+    """Procesa un .xlsx o .pdf y extrae identificadores relevantes."""
     ct = (file.content_type or "").lower()
     data = await file.read()
 
-    # ---- Excel (.xlsx)
+    # Excel (.xlsx)
     if ct in ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel") \
        or file.filename.lower().endswith(".xlsx"):
         if openpyxl is None:
@@ -73,8 +75,8 @@ async def upload_file(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Excel inválido: {e}")
 
-    # ---- PDF
-    if ct in ("application/pdf",) or file.filename.lower().endswith(".pdf"):
+    # PDF
+    if ct == "application/pdf" or file.filename.lower().endswith(".pdf"):
         if PdfReader is None:
             raise _error_500("pypdf no está instalado")
         try:
@@ -92,7 +94,7 @@ async def upload_file(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"PDF inválido: {e}")
 
-    # ---- Tipo no permitido
+    # Tipo no permitido
     raise HTTPException(
         status_code=415,
         detail="Tipo de archivo no soportado. Sube .pdf o .xlsx",

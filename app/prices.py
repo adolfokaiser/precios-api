@@ -8,7 +8,7 @@ from .auth import get_current_user, UserPublic
 
 router = APIRouter(prefix="/prices", tags=["prices"])
 
-# -------- Modelos --------
+# Modelos
 class FuelEnum(str, Enum):
     Regular = "Regular"
     Premium = "Premium"
@@ -33,26 +33,28 @@ class PriceList(BaseModel):
     limit: int
     total: int
 
-# -------- "DB" en memoria --------
+# Almacenamiento en memoria (solo para pruebas)
 _prices_db: Dict[int, PriceOut] = {}
 _id = 0
 
 def _next_id() -> int:
+    """Genera un ID incremental (no concurrente)."""
     global _id
     _id += 1
     return _id
 
-# Helper para Pydantic v1/v2
+# Compatibilidad Pydantic v1/v2
 def to_dict(model):
+    """Devuelve el dict del modelo para Pydantic v1 o v2."""
     return model.model_dump() if hasattr(model, "model_dump") else model.dict()
 
-# -------- Endpoints --------
 @router.post("", response_model=PriceOut, status_code=201)
 def create_price(payload: PriceIn, user: UserPublic = Depends(get_current_user)):
+    """Crear un precio nuevo."""
     item = PriceOut(
         id=_next_id(),
         created_by=user.email,
-        created_at=datetime.utcnow(),  # naive UTC
+        created_at=datetime.utcnow(),  # UTC naive
         **to_dict(payload),
     )
     _prices_db[item.id] = item
@@ -63,11 +65,12 @@ def list_prices(
     station_id: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
-    q: Optional[str] = None,  # búsqueda global (station_id/notes)
+    q: Optional[str] = None,  # búsqueda por station_id/notes
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
     _: UserPublic = Depends(get_current_user),
 ):
+    """Listar precios con filtros y paginación."""
     items = list(_prices_db.values())
 
     if station_id:
@@ -87,6 +90,7 @@ def list_prices(
 
 @router.get("/{price_id}", response_model=PriceOut)
 def get_price(price_id: int, _: UserPublic = Depends(get_current_user)):
+    """Obtener un precio por ID."""
     item = _prices_db.get(price_id)
     if not item:
         raise HTTPException(status_code=404, detail="No encontrado")
@@ -94,6 +98,7 @@ def get_price(price_id: int, _: UserPublic = Depends(get_current_user)):
 
 @router.put("/{price_id}", response_model=PriceOut)
 def update_price(price_id: int, payload: PriceIn, user: UserPublic = Depends(get_current_user)):
+    """Reemplazar un precio existente."""
     if price_id not in _prices_db:
         raise HTTPException(status_code=404, detail="No encontrado")
 
@@ -108,6 +113,7 @@ def update_price(price_id: int, payload: PriceIn, user: UserPublic = Depends(get
 
 @router.delete("/{price_id}", status_code=204)
 def delete_price(price_id: int, _: UserPublic = Depends(get_current_user)):
+    """Eliminar un precio por ID."""
     if price_id not in _prices_db:
         raise HTTPException(status_code=404, detail="No encontrado")
     del _prices_db[price_id]
